@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Offline test: fake yt-dlp, gallery-dl, ffprobe, ffmpeg and curl on PATH, then run the real ig2txt.
+# Offline test: fake yt-dlp, gallery-dl, ffprobe, ffmpeg and curl on PATH, then run the real watch2md.
 # Checks the Gemini request and the note for a single video, an Instagram reel, and video,
 # mixed and image-only carousels.
 # Run: bash tests/test.sh
@@ -39,7 +39,7 @@ cp "$work/bin/ffprobe" "$work/bin/ffmpeg"
 
 cat > "$work/bin/curl" <<'EOF'
 #!/usr/bin/env bash
-# Answers each Gemini call ig2txt makes; saves the generateContent body to $FAKE_LOG/request.json.
+# Answers each Gemini call watch2md makes; saves the generateContent body to $FAKE_LOG/request.json.
 args="$*"
 out=""
 prev=""
@@ -70,8 +70,8 @@ check() { # <description> <command...>
 
 run() { # <files for gallery-dl> <url>
   rm -rf "$work/log" "$work/out"; mkdir -p "$work/log" "$work/out"
-  FAKE_FILES="$1" FAKE_LOG="$work/log" IG2TXT_OUT="$work/out" GEMINI_API_KEY=test-key \
-    PATH="$work/bin:$PATH" bash "$here/ig2txt" "$2" > "$work/log/stdout" 2>&1
+  FAKE_FILES="$1" FAKE_LOG="$work/log" WATCH2MD_OUT="$work/out" GEMINI_API_KEY=test-key \
+    PATH="$work/bin:$PATH" bash "$here/watch2md" "$2" > "$work/log/stdout" 2>&1
 }
 
 req="$work/log/request.json"

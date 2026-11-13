@@ -2,17 +2,17 @@
 # Instagram/TikTok/YouTube/LinkedIn video URL, or Instagram image post → markdown notes.
 # Default: Gemini watches the video — speech plus on-screen text, graphics, annotations.
 # --audio-only: speech-only transcript via OpenAI Whisper API; slug + title via gpt-4o-mini (~$0.0002 per call).
-# Output: $IG2TXT_OUT (default: current folder)/<topic-slug>-<video-id>.md
+# Output: $WATCH2MD_OUT (default: current folder)/<topic-slug>-<video-id>.md
 # Carousels (videos, images or both): every item is sent in one Gemini request, labelled "Item N".
 
 set -u
 
 audio_only=0
 [ "${1:-}" = "--audio-only" ] && { audio_only=1; shift; }
-[ $# -lt 1 ] && { echo "usage: ig2txt [--audio-only] <video-url>"; exit 1; }
+[ $# -lt 1 ] && { echo "usage: watch2md [--audio-only] <video-url>"; exit 1; }
 
 gemini_key="${GEMINI_API_KEY:-}"
-[ -z "$gemini_key" ] && gemini_key=$(security find-generic-password -a "$USER" -s ig2txt-gemini-api-key -w 2>/dev/null)
+[ -z "$gemini_key" ] && gemini_key=$(security find-generic-password -a "$USER" -s watch2md-gemini-api-key -w 2>/dev/null)
 if [ "$audio_only" -eq 0 ] && [ -z "$gemini_key" ]; then
   echo "[warn] GEMINI_API_KEY not set — falling back to audio-only"
   audio_only=1
@@ -24,15 +24,15 @@ command -v ffmpeg >/dev/null || { echo "error: ffmpeg not installed (brew instal
 command -v jq     >/dev/null || { echo "error: jq not installed (brew install jq)"; exit 1; }
 
 url="$1"
-outdir="${IG2TXT_OUT:-$PWD}"
+outdir="${WATCH2MD_OUT:-$PWD}"
 mkdir -p "$outdir"
 
 tmpdir=$(mktemp -d) || exit 1
 trap 'rm -rf "$tmpdir"' EXIT
 
-browser="${IG2TXT_BROWSER:-chrome}"
+browser="${WATCH2MD_BROWSER:-chrome}"
 gemini_api="https://generativelanguage.googleapis.com"
-model="${IG2TXT_GEMINI_MODEL:-gemini-flash-latest}"
+model="${WATCH2MD_GEMINI_MODEL:-gemini-flash-latest}"
 
 body="$tmpdir/body.txt"
 id=""
@@ -43,7 +43,7 @@ used_model=""
 # This site's login cookies are cached in the Keychain after the first browser read, so macOS
 # asks for the "Chrome Safe Storage" password once per site login instead of once per video.
 site=$(echo "$url" | sed -E 's#^[a-zA-Z]+://##; s#[/:?].*$##' | awk -F. '{ if (NF >= 2) print $(NF-1) "." $NF; else print $0 }')
-cookie_service="ig2txt-cookies-$site"
+cookie_service="watch2md-cookies-$site"
 jar="$tmpdir/cookies.txt"
 
 # Instagram goes to gallery-dl, because yt-dlp cannot download image slides. It reads the
@@ -84,7 +84,7 @@ dl() {
 fetch() {
   dl 2>/dev/null && return 0
   if [ -z "$browser" ]; then
-    echo "download failed (cookies disabled via empty IG2TXT_BROWSER)"; return 1
+    echo "download failed (cookies disabled via empty WATCH2MD_BROWSER)"; return 1
   fi
 
   local cached

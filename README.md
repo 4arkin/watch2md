@@ -1,4 +1,4 @@
-<h1 align="center">ig2txt</h1>
+<h1 align="center">watch2md</h1>
 
 <p align="center">
   <strong>Turn short videos into knowledge your AI agent can use: what is said, and what is only on screen.</strong>
@@ -13,12 +13,12 @@
 </p>
 
 <p align="center">
-  <img src="assets/hero.png" width="880" alt="An invented example reel, 38 seconds. On screen: the caption 'Disk full? 1 command' and a terminal with the command du -sh ~/* | sort -h | tail -5, which lists five folders by size, with Downloads last at 48G. The speech only says: Open the terminal and paste this. ig2txt turns the reel link into a note. Its Timeline has each SAID, ON SCREEN and SHOWN entry with a timestamp. Its 'Shown, not said' section has the command and the 48G Downloads folder. The command is never said. The note has it.">
+  <img src="assets/hero.png" width="880" alt="An invented example reel, 38 seconds. On screen: the caption 'Disk full? 1 command' and a terminal with the command du -sh ~/* | sort -h | tail -5, which lists five folders by size, with Downloads last at 48G. The speech only says: Open the terminal and paste this. watch2md turns the reel link into a note. Its Timeline has each SAID, ON SCREEN and SHOWN entry with a timestamp. Its 'Shown, not said' section has the command and the 48G Downloads folder. The command is never said. The note has it.">
 </p>
 
-Short videos teach a lot: a prompt, a command, a framework on a slide, a tool in a demo. Much of it is only on screen. Give your agent the link to a reel, a TikTok, a YouTube video or an Instagram carousel. Your agent runs `ig2txt "<url>"` and gets a markdown note with the speech and with all that the video shows: captions, slides, code, UI demos and diagrams. Then your agent puts that knowledge into your skills, playbooks and notes.
+Short videos teach a lot: a prompt, a command, a framework on a slide, a tool in a demo. Much of it is only on screen. Give your agent the link to a reel, a TikTok, a YouTube video or an Instagram carousel. Your agent runs `watch2md "<url>"` and gets a markdown note with the speech and with all that the video shows: captions, slides, code, UI demos and diagrams. Then your agent puts that knowledge into your skills, playbooks and notes.
 
-A transcript tool hears the speech only. In a reel that says *"paste this"* and shows the command on screen, the transcript has no command. An image carousel has no speech, so a transcript is empty. ig2txt sends every item to Gemini, which watches the video and reads each slide.
+A transcript tool hears the speech only. In a reel that says *"paste this"* and shows the command on screen, the transcript has no command. An image carousel has no speech, so a transcript is empty. watch2md sends every item to Gemini, which watches the video and reads each slide.
 
 > **AI agents:** read [`AGENTS.md`](AGENTS.md). It is the complete protocol.
 
@@ -27,13 +27,13 @@ A transcript tool hears the speech only. In a reel that says *"paste this"* and 
 ## Before and after
 
 <p align="center">
-  <img src="assets/before-after.png" width="880" alt="Before: a speech-to-text transcript. Speech: Open the terminal and paste this. Screen: gone, the command was never said, so the transcript does not have it. Carousels: image slides have no speech, so the transcript is empty. After: ig2txt. Speech: verbatim, with a timestamp for each entry. Screen: every caption, slide and line of code, verbatim, and demos and diagrams as text. Carousels: every item, in post order, with slide text verbatim under ### Item N.">
+  <img src="assets/before-after.png" width="880" alt="Before: a speech-to-text transcript. Speech: Open the terminal and paste this. Screen: gone, the command was never said, so the transcript does not have it. Carousels: image slides have no speech, so the transcript is empty. After: watch2md. Speech: verbatim, with a timestamp for each entry. Screen: every caption, slide and line of code, verbatim, and demos and diagrams as text. Carousels: every item, in post order, with slide text verbatim under ### Item N.">
 </p>
 
 ## How it works
 
 <p align="center">
-  <img src="assets/how-it-works.png" width="880" alt="Four steps. 1, you or your agent give ig2txt a link. 2, ig2txt downloads it: Instagram through gallery-dl, videos and images, other sites through yt-dlp up to 720p, with browser cookies if the site needs a login. 3, Gemini watches every item in one request, in post order, at high resolution. 4, ig2txt writes one markdown file in your notes folder and deletes the downloads and the Gemini uploads. Fallback: with no Gemini key, or when video mode fails, ig2txt transcribes the speech with Whisper and marks the note mode: audio.">
+  <img src="assets/how-it-works.png" width="880" alt="Four steps. 1, you or your agent give watch2md a link. 2, watch2md downloads it: Instagram through gallery-dl, videos and images, other sites through yt-dlp up to 720p, with browser cookies if the site needs a login. 3, Gemini watches every item in one request, in post order, at high resolution. 4, watch2md writes one markdown file in your notes folder and deletes the downloads and the Gemini uploads. Fallback: with no Gemini key, or when video mode fails, watch2md transcribes the speech with Whisper and marks the note mode: audio.">
 </p>
 
 ```
@@ -76,7 +76,7 @@ The prompt tells Gemini to write `[illegible]` for text it cannot read, and neve
 
 ## Who it is for
 
-| You | You do today | ig2txt adds |
+| You | You do today | watch2md adds |
 |---|---|---|
 | Build AI skills, prompts and playbooks | You watch a video, then retype the steps by hand | A note your agent turns into a skill or a playbook entry |
 | Use an AI agent every day | Your agent cannot open a video link | One command that your agent runs from any folder |
@@ -90,14 +90,14 @@ You need `bash`, `curl`, `jq`, `ffmpeg`, `yt-dlp`, and `gallery-dl` for Instagra
 
 ```sh
 brew install jq ffmpeg yt-dlp gallery-dl   # Linux: your package manager, and pip install yt-dlp gallery-dl
-git clone https://github.com/4arkin/ig2txt.git
-ln -s "$PWD/ig2txt/ig2txt" /opt/homebrew/bin/ig2txt   # or /usr/local/bin, any folder always on PATH
+git clone https://github.com/4arkin/watch2md.git
+ln -s "$PWD/watch2md/watch2md" /opt/homebrew/bin/watch2md   # or /usr/local/bin, any folder always on PATH
 ```
 
 Get a Gemini API key at https://aistudio.google.com/apikey. On macOS, keep it in the Keychain, where agent shells can read it:
 
 ```sh
-security add-generic-password -a "$USER" -s ig2txt-gemini-api-key -w
+security add-generic-password -a "$USER" -s watch2md-gemini-api-key -w
 ```
 
 Elsewhere, export `GEMINI_API_KEY`.
@@ -105,9 +105,9 @@ Elsewhere, export `GEMINI_API_KEY`.
 ## Use
 
 ```sh
-ig2txt "https://www.instagram.com/reel/<id>/"
-ig2txt "https://www.instagram.com/p/<id>/"    # carousel: videos, images, or both
-ig2txt --audio-only "<url>"                   # speech only, through OpenAI Whisper
+watch2md "https://www.instagram.com/reel/<id>/"
+watch2md "https://www.instagram.com/p/<id>/"    # carousel: videos, images, or both
+watch2md --audio-only "<url>"                   # speech only, through OpenAI Whisper
 ```
 
 ### Let your agent use it
@@ -116,7 +116,7 @@ Paste this into `CLAUDE.md`, `AGENTS.md` or `GEMINI.md` in your home or project 
 
 ```markdown
 ## Video URLs
-Any Instagram post, reel or carousel (videos, images or both), and any TikTok / YouTube / LinkedIn / X video URL → `ig2txt "<url>"` via the shell, from any folder. Never a scraper or the browser.
+Any Instagram post, reel or carousel (videos, images or both), and any TikTok / YouTube / LinkedIn / X video URL → `watch2md "<url>"` via the shell, from any folder. Never a scraper or the browser.
 ```
 
 Then send a link to your agent. The full protocol is in [AGENTS.md](AGENTS.md).
@@ -125,11 +125,11 @@ Then send a link to your agent. The full protocol is in [AGENTS.md](AGENTS.md).
 
 | Variable | Default | Does |
 |---|---|---|
-| `GEMINI_API_KEY` | Keychain `ig2txt-gemini-api-key` | Video mode. With no key, ig2txt uses audio-only mode. |
+| `GEMINI_API_KEY` | Keychain `watch2md-gemini-api-key` | Video mode. With no key, watch2md uses audio-only mode. |
 | `OPENAI_API_KEY` | none | Audio-only mode, and the fallback when video mode fails. |
-| `IG2TXT_OUT` | current folder | Where notes go. |
-| `IG2TXT_BROWSER` | `chrome` | Browser for login cookies (`brave`, `firefox`, `edge`, `safari`). Empty turns the cookie retry off. |
-| `IG2TXT_GEMINI_MODEL` | `gemini-flash-latest` | Gemini model. |
+| `WATCH2MD_OUT` | current folder | Where notes go. |
+| `WATCH2MD_BROWSER` | `chrome` | Browser for login cookies (`brave`, `firefox`, `edge`, `safari`). Empty turns the cookie retry off. |
+| `WATCH2MD_GEMINI_MODEL` | `gemini-flash-latest` | Gemini model. |
 
 ## Cost
 
@@ -141,16 +141,16 @@ An 80-second reel is about 45K input tokens on Gemini Flash, roughly $0.05. An 8
 A transcript has the speech only. The command in a coding reel, the text on a slide and the numbers in a demo are often on screen and not in the speech. Those go to the "Shown, not said" section.
 
 **Does it work on image carousels?**
-Yes. ig2txt downloads every Instagram post with gallery-dl, so image slides, video items and mixed carousels all work. Each item gets a `### Item N` block, and the slide text is verbatim.
+Yes. watch2md downloads every Instagram post with gallery-dl, so image slides, video items and mixed carousels all work. Each item gets a `### Item N` block, and the slide text is verbatim.
 
 **Why does macOS ask for a password?**
-Instagram needs a login, so ig2txt reads your browser's cookies. macOS asks for access to "Chrome Safe Storage". Click **Allow**, not **Always Allow**. ig2txt then keeps only that site's cookies in the Keychain, so the prompt comes once per site. On Linux there is no cookie cache.
+Instagram needs a login, so watch2md reads your browser's cookies. macOS asks for access to "Chrome Safe Storage". Click **Allow**, not **Always Allow**. watch2md then keeps only that site's cookies in the Keychain, so the prompt comes once per site. On Linux there is no cookie cache.
 
 **What if Gemini fails?**
-ig2txt falls back to Whisper, which transcribes the speech only. The note then has `mode: audio` and has no on-screen content. Audio-only mode needs `OPENAI_API_KEY`.
+watch2md falls back to Whisper, which transcribes the speech only. The note then has `mode: audio` and has no on-screen content. Audio-only mode needs `OPENAI_API_KEY`.
 
 **What about long YouTube videos?**
-Over 20 minutes, ig2txt sends the YouTube link instead of a download, at standard resolution, so the video fits the context window.
+Over 20 minutes, watch2md sends the YouTube link instead of a download, at standard resolution, so the video fits the context window.
 
 **Can it read a full profile?**
 No. Collect the reel URLs from the profile's `/reels/` page in a browser, then run them one at a time, with about 20 seconds between runs.
@@ -167,7 +167,7 @@ The test runs offline. It replaces yt-dlp, gallery-dl, ffmpeg and the Gemini API
 
 | Path | What |
 |---|---|
-| `ig2txt` | The script |
+| `watch2md` | The script |
 | [`AGENTS.md`](AGENTS.md) | The protocol your agent follows, and the snippet for your agent's instructions |
 | [`GOTCHAS.md`](GOTCHAS.md) | Carousels, cookies, Gemini, Whisper and agent shells: known traps, and the fix for each |
 | `tests/` | `bash tests/test.sh`, offline |
