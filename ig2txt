@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Instagram/TikTok/YouTube/LinkedIn video URL → markdown notes.
+# Instagram/TikTok/YouTube/LinkedIn video URL, or Instagram image post → markdown notes.
 # Default: Gemini watches the video — speech plus on-screen text, graphics, annotations.
 # --audio-only: speech-only transcript via OpenAI Whisper API; slug + title via gpt-4o-mini (~$0.0002 per call).
 # Output: $IG2TXT_OUT (default: current folder)/<topic-slug>-<video-id>.md
-# Video carousels: every item is sent in one Gemini request, labelled "Item N".
+# Carousels (videos, images or both): every item is sent in one Gemini request, labelled "Item N".
 
 set -u
 
@@ -46,8 +46,16 @@ site=$(echo "$url" | sed -E 's#^[a-zA-Z]+://##; s#[/:?].*$##' | awk -F. '{ if (N
 cookie_service="ig2txt-cookies-$site"
 jar="$tmpdir/cookies.txt"
 
-# Carousel items share the post id and sort by position: media/001_<post-id>.mp4, media/002_<post-id>.mp4.
-# A single video lands as media/NA_<video-id>.mp4.
+# Instagram goes to gallery-dl, because yt-dlp cannot download image slides. It reads the
+# cookie jar with --cookies like yt-dlp, but writes it with --cookies-export.
+cookie_out="--cookies"
+if [ "$site" = "instagram.com" ]; then
+  command -v gallery-dl >/dev/null || { echo "error: gallery-dl not installed (brew install gallery-dl)"; exit 1; }
+  cookie_out="--cookies-export"
+fi
+
+# Carousel items share the post id and sort by position: media/001_<post-id>.mp4, media/002_<post-id>.jpg.
+# A single video from yt-dlp lands as media/NA_<video-id>.mp4.
 tmpl="media/%(playlist_index)03d_%(playlist_id,id)s.%(ext)s"
 items=1
 
@@ -61,23 +69,34 @@ collect_media() {
   done
 }
 
-# yt-dlp into $tmpdir with the cookie retry; arguments select what to download.
+# Downloads into $tmpdir/media; arguments are cookie options. yt-dlp formats come from $fmt.
+# videos=merged makes gallery-dl take Instagram's MP4 with sound directly; its default first tries
+# the DASH stream through the yt-dlp Python module, which a standalone install does not have.
+dl() {
+  if [ "$site" = "instagram.com" ]; then
+    gallery-dl -q -o videos=merged -D "$tmpdir/media" -f "{num:>03}_{post_shortcode}.{extension}" "$@" "$url"
+  else
+    yt-dlp "${fmt[@]}" -o "$tmpdir/$tmpl" --quiet --no-warnings "$@" "$url"
+  fi
+}
+
+# dl with the cookie retry. Set $fmt first.
 fetch() {
-  yt-dlp "$@" -o "$tmpdir/$tmpl" --quiet --no-warnings "$url" 2>/dev/null && return 0
+  dl 2>/dev/null && return 0
   if [ -z "$browser" ]; then
-    echo "yt-dlp failed (cookies disabled via empty IG2TXT_BROWSER)"; return 1
+    echo "download failed (cookies disabled via empty IG2TXT_BROWSER)"; return 1
   fi
 
   local cached
   cached=$(security find-generic-password -a "$USER" -s "$cookie_service" -w 2>/dev/null)
   if [ -n "$cached" ] && echo "$cached" | base64 -d > "$jar" 2>/dev/null; then
-    yt-dlp "$@" -o "$tmpdir/$tmpl" --cookies "$jar" --quiet --no-warnings "$url" 2>/dev/null && return 0
+    dl --cookies "$jar" 2>/dev/null && return 0
   fi
 
-  echo "[yt-dlp] public fetch failed — reading $browser cookies (macOS asks for the keychain password; once per site login)..."
+  echo "[download] public fetch failed — reading $browser cookies (macOS asks for the keychain password; once per site login)..."
   rm -f "$jar"
-  yt-dlp "$@" -o "$tmpdir/$tmpl" --cookies-from-browser "$browser" --cookies "$jar" --quiet --no-warnings "$url" || {
-    echo "yt-dlp failed even with $browser cookies — login required + cookies unavailable, or unsupported URL"; return 1
+  dl --cookies-from-browser "$browser" "$cookie_out" "$jar" || {
+    echo "download failed even with $browser cookies — login required + cookies unavailable, or unsupported URL"; return 1
   }
   # Cache only this site's cookies, not the whole browser jar.
   if [ -s "$jar" ]; then
@@ -113,12 +132,17 @@ Rules: never guess text you cannot read; write [illegible]. Never invent speech;
 EOF
 
 read -r -d '' carousel_prompt <<'EOF'
-This post is a carousel: the videos above are its items, in order, each labelled "Item N". Treat them as one piece and write one set of notes covering every item. In the Timeline, start each item with a line "### Item N" and restart timestamps at [00:00] for each item.
+This post is a carousel: the files above are its items, in order, each labelled "Item N". Treat them as one piece and write one set of notes covering every item. In the Timeline, start each item with a line "### Item N" and restart timestamps at [00:00] for each item.
 EOF
 
-# Uploads one file to the Gemini Files API and waits until it is ready. Appends to $uris and $names.
+read -r -d '' image_prompt <<'EOF'
+Image files above are still images, not videos. For an image, write its Timeline entries without a timestamp: ON SCREEN for every piece of text on it, verbatim, and SHOWN for its visuals. An image has no speech.
+EOF
+
+# Uploads one file (<path> <mime type>) to the Gemini Files API and waits until it is ready.
+# Appends to $uris, $mimes and $names.
 upload() {
-  local video="$1" size upload_url file_json uri name state="" i
+  local video="$1" type="$2" size upload_url file_json uri name state="" i
   size=$(wc -c < "$video" | tr -d " ")
   echo "[gemini] uploading $(basename "$video") ($(( size / 1048576 ))MB)..."
   upload_url=$(curl -sS -D - -o /dev/null "$gemini_api/upload/v1beta/files" \
@@ -126,9 +150,9 @@ upload() {
     -H "X-Goog-Upload-Protocol: resumable" \
     -H "X-Goog-Upload-Command: start" \
     -H "X-Goog-Upload-Header-Content-Length: $size" \
-    -H "X-Goog-Upload-Header-Content-Type: video/mp4" \
+    -H "X-Goog-Upload-Header-Content-Type: $type" \
     -H "Content-Type: application/json" \
-    -d "{\"file\":{\"display_name\":\"$(basename "$video" .mp4)\"}}" | tr -d '\r' | awk 'tolower($1)=="x-goog-upload-url:"{print $2}')
+    -d "{\"file\":{\"display_name\":\"$(basename "${video%.*}")\"}}" | tr -d '\r' | awk 'tolower($1)=="x-goog-upload-url:"{print $2}')
   [ -n "$upload_url" ] || { echo "gemini upload could not start"; return 1; }
   file_json=$(curl -sS "$upload_url" \
     -H "Content-Length: $size" \
@@ -146,8 +170,9 @@ upload() {
     [ "$state" = "FAILED" ] && break
     sleep 2
   done
-  [ "$state" = "ACTIVE" ] || { echo "gemini could not process the video (state: ${state:-unknown})"; return 1; }
+  [ "$state" = "ACTIVE" ] || { echo "gemini could not process the file (state: ${state:-unknown})"; return 1; }
   uris+=("$uri")
+  mimes+=("$type")
 }
 
 # Removes every file uploaded so far from Gemini.
@@ -159,11 +184,12 @@ cleanup_uploads() {
   names=()
 }
 uris=()
+mimes=()
 names=()
 
 # Video mode: fills $body, $id, $slug, $title, $used_model. Returns 1 on any failure.
 watch() {
-  local uri="" mime="" duration=0 fps=0 res="MEDIA_RESOLUTION_HIGH"
+  local uri="" mime="" duration=0 fps=0 res="MEDIA_RESOLUTION_HIGH" videos=0 images=0
 
   case "$url" in
     *youtube.com/*|*youtu.be/*)
@@ -180,30 +206,45 @@ watch() {
   esac
 
   if [ -z "$uri" ]; then
-    echo "[yt-dlp] downloading video..."
-    fetch -f "bv*[height<=720]+ba/b[height<=720]/b" --merge-output-format mp4 || return 1
-    local video d
-    local videos=("$tmpdir"/media/*.mp4)
-    [ -f "${videos[0]}" ] || { echo "no video downloaded"; return 1; }
-    items=${#videos[@]}
-    id=$(basename "${videos[0]}" .mp4); id="${id#*_}"
-    [ "$items" -gt 1 ] && echo "[carousel] $items videos"
+    echo "[download] downloading media..."
+    fmt=(-f "bv*[height<=720]+ba/b[height<=720]/b" --merge-output-format mp4)
+    fetch || return 1
+    collect_media
+    [ "${#media[@]}" -gt 0 ] || { echo "nothing downloaded"; return 1; }
+    items=${#media[@]}
+    id="${media[0]##*/}"; id="${id%.*}"; id="${id#*_}"
+    local f d ext
     duration=0
-    for video in "${videos[@]}"; do
-      d=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$video" 2>/dev/null)
-      d="${d%.*}"
-      case "$d" in ''|*[!0-9]*) d=0 ;; esac
-      duration=$(( duration + d ))
-      upload "$video" || { cleanup_uploads; return 1; }
+    for f in "${media[@]}"; do
+      ext=$(echo "${f##*.}" | tr '[:upper:]' '[:lower:]')
+      case "$ext" in
+        jpg|jpeg) mime=image/jpeg ;;
+        png|webp|heic) mime="image/$ext" ;;
+        webm) mime=video/webm ;;
+        mov) mime=video/quicktime ;;
+        *) mime=video/mp4 ;;
+      esac
+      case "$mime" in
+        image/*) images=$(( images + 1 )) ;;
+        *)
+          videos=$(( videos + 1 ))
+          d=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$f" 2>/dev/null)
+          d="${d%.*}"
+          case "$d" in ''|*[!0-9]*) d=0 ;; esac
+          duration=$(( duration + d ))
+          ;;
+      esac
+      upload "$f" "$mime" || { cleanup_uploads; return 1; }
     done
-    mime="video/mp4"
+    [ "$items" -gt 1 ] && echo "[carousel] $items items: $videos video, $images image"
   else
     uris=("$uri")
+    mimes=("")
   fi
 
   # Frame detail vs cost: clips up to 3 min get 2 fps so brief on-screen text is caught;
-  # past 20 min (or unknown length) high resolution would not fit the context window.
-  if [ "$duration" -eq 0 ] || [ "$duration" -gt 1200 ]; then
+  # past 20 min (or unknown video length) high resolution would not fit the context window.
+  if [ "$duration" -gt 1200 ] || { [ "$duration" -eq 0 ] && [ "$videos" -gt 0 ]; }; then
     res=""
   elif [ "$duration" -le 180 ]; then
     fps=2
@@ -211,16 +252,22 @@ watch() {
 
   echo "[gemini] watching (${duration}s, $model)..."
   local resp="$tmpdir/gemini.json" prompt="$watch_prompt"
+  [ "$images" -gt 0 ] && prompt="$image_prompt
+
+$prompt"
   [ "$items" -gt 1 ] && prompt="$carousel_prompt
 
-$watch_prompt"
-  # Each item's video part, preceded by an "Item N" label when the post is a carousel.
-  printf '%s\n' "${uris[@]}" | jq -R . | jq -s --arg mime "$mime" --arg p "$prompt" --argjson fps "$fps" --arg res "$res" '{
+$prompt"
+  # Each item's file part, preceded by an "Item N" label when the post is a carousel.
+  # Frame rate applies to video parts only.
+  local i
+  for i in "${!uris[@]}"; do printf '%s\t%s\n' "${uris[$i]}" "${mimes[$i]}"; done |
+    jq -R 'split("\t")' | jq -s --arg p "$prompt" --argjson fps "$fps" --arg res "$res" '{
     contents: [{parts: ((
-      length as $n | [to_entries[] |
+      length as $n | [to_entries[] | .value[0] as $uri | (.value[1] // "") as $mime |
         (if $n > 1 then [{text: "Item \(.key + 1)"}] else [] end)
-        + [({file_data: ({file_uri: .value} + (if $mime != "" then {mime_type: $mime} else {} end))}
-            + (if $fps > 0 then {video_metadata: {fps: $fps}} else {} end))]
+        + [({file_data: ({file_uri: $uri} + (if $mime != "" then {mime_type: $mime} else {} end))}
+            + (if $fps > 0 and ($mime | startswith("image/") | not) then {video_metadata: {fps: $fps}} else {} end))]
       ] | add) + [{text: $p}])
     }],
     generationConfig: ({maxOutputTokens: 32768} + (if $res != "" then {mediaResolution: $res} else {} end))
@@ -258,8 +305,9 @@ if [ "$audio_only" -eq 1 ]; then
   # reported as such instead of failing the download and triggering the cookie retry.
   collect_media
   if [ "${#media[@]}" -eq 0 ]; then
-    echo "[yt-dlp] downloading audio..."
-    fetch -f "ba/b" || exit 1
+    echo "[download] downloading audio..."
+    fmt=(-f "ba/b")
+    fetch || exit 1
     collect_media
   fi
   [ "${#media[@]}" -gt 0 ] || { echo "nothing downloaded"; exit 1; }

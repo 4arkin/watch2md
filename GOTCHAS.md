@@ -2,19 +2,21 @@
 
 ## Carousels
 
-- **Video carousels go to Gemini as one request.** Each item is labelled `Item N`, in post order. The Timeline splits into `### Item N` blocks, and timestamps restart at `[00:00]` for each item. The frontmatter gets `items: N`. The note is named after the post id.
-- **Image-only carousels do not work.** yt-dlp finds no video in an image post, so ig2txt stops. The last error often says "login required". That message is wrong for this case: check whether the post has only images before you debug cookies. Read the slides in a browser, or give screenshots to a model that reads images.
-- **Audio-only mode on a carousel** transcribes each item under `## Item N`. Items with no sound track, or with music only, show as `(no sound track)` or `(no speech)`. When no item has speech, ig2txt writes no file and says so.
+- **A carousel goes to Gemini as one request**: videos, images, or both. Each item is labelled `Item N`, in post order. The Timeline splits into `### Item N` blocks. Video items get timestamps that restart at `[00:00]`; image items get their text verbatim under ON SCREEN and their visuals under SHOWN. The frontmatter gets `items: N`. The note is named after the post id.
+- **yt-dlp cannot download Instagram images.** On an image post it returns empty items ("No video formats found"), and a cookie retry then reports "login required". That is why ig2txt downloads every Instagram URL with gallery-dl, and other sites with yt-dlp.
+- **gallery-dl runs with `videos=merged`.** Its default first tries the Instagram DASH stream through the yt-dlp Python module. A standalone gallery-dl install (Homebrew) does not have that module, prints `Cannot import yt-dlp`, and only then falls back to the plain MP4. `videos=merged` takes the plain MP4, with sound, directly.
+- **Image slides are cheap.** An 8-slide carousel costs about 9K input tokens, less than one 80-second reel.
+- **Audio-only mode on a carousel** transcribes each item under `## Item N`. Image items and items with no sound track show as `(no sound track)`; items with music only show as `(no speech)`. When no item has speech, ig2txt writes no file and says so.
 
 ## Instagram and cookies
 
-- **Instagram reels need a login.** The public fetch fails for almost every reel. ig2txt then reads your browser's cookies (`IG2TXT_BROWSER`, default `chrome`).
+- **Instagram needs a login.** The public fetch fails for almost every post. ig2txt then reads your browser's cookies (`IG2TXT_BROWSER`, default `chrome`). yt-dlp and gallery-dl use the same cached cookies.
 - **The macOS keychain prompt.** Reading Chrome cookies makes macOS ask for your password ("security wants to access Chrome Safe Storage"). Click **Allow**, not **Always Allow**: "Always Allow" opens every Chrome cookie and saved password to any later read.
 - **One prompt per site, not per video.** After the first read, ig2txt keeps only that site's cookies in the Keychain, as `ig2txt-cookies-<site>` (for example `ig2txt-cookies-instagram.com`). When you log out or the session expires, delete it: `security delete-generic-password -s ig2txt-cookies-instagram.com`.
 - **On Linux there is no cookie cache.** Each login-required fetch reads the browser again.
 - **Run batches one video at a time, with about 20 seconds between them.** Fast bulk pulls on a logged-in account can hit an Instagram rate limit.
 - **yt-dlp cannot list a profile's reels.** Collect the reel URLs from the profile's `/reels/` page in a browser.
-- **Keep yt-dlp current** (`brew upgrade yt-dlp` or `pip install -U yt-dlp`). Instagram and TikTok changes break old versions.
+- **Keep yt-dlp and gallery-dl current** (`brew upgrade yt-dlp gallery-dl`). Instagram and TikTok changes break old versions.
 
 ## Gemini
 

@@ -2,20 +2,22 @@
 
 <!-- Intro copy comes from /HQ/Content. Everything below is reference. -->
 
-`ig2txt <video-url>` turns an Instagram, TikTok, YouTube, LinkedIn or X video into a markdown note. Gemini watches the video, so the note has what is said and also what is shown: captions, slides, code, UI demos, diagrams.
+`ig2txt <url>` turns an Instagram, TikTok, YouTube, LinkedIn or X video into a markdown note. Instagram carousels work too: videos, image slides, or both. Gemini watches every item, so the note has what is said and also what is shown: captions, slides, code, UI demos, diagrams.
 
 ```
-URL ──→ yt-dlp (≤720p, browser cookies if login is needed)
-     ──→ Gemini Files API ──→ Gemini watches every item ──→ <slug>-<video-id>.md
-                              (fallback: Whisper, speech only)
+Instagram URL ──→ gallery-dl (videos + images) ─┐
+other URL ──────→ yt-dlp (≤720p) ───────────────┤  browser cookies if login is needed
+                                                ↓
+              Gemini Files API ──→ Gemini reads every item, in order ──→ <slug>-<post-id>.md
+                                   (fallback: Whisper, speech only)
 ```
 
 ## Install
 
-You need `bash`, `curl`, `jq`, `ffmpeg` and `yt-dlp`.
+You need `bash`, `curl`, `jq`, `ffmpeg`, `yt-dlp`, and `gallery-dl` for Instagram.
 
 ```sh
-brew install jq ffmpeg yt-dlp          # Linux: your package manager, and pip install yt-dlp
+brew install jq ffmpeg yt-dlp gallery-dl   # Linux: your package manager, and pip install yt-dlp gallery-dl
 git clone https://github.com/4arkin/ig2txt.git
 ln -s "$PWD/ig2txt/ig2txt" /opt/homebrew/bin/ig2txt   # or /usr/local/bin, any folder always on PATH
 ```
@@ -32,7 +34,8 @@ Elsewhere, export `GEMINI_API_KEY`.
 
 ```sh
 ig2txt "https://www.instagram.com/reel/<id>/"
-ig2txt --audio-only "<url>"    # speech only, through OpenAI Whisper
+ig2txt "https://www.instagram.com/p/<id>/"    # carousel: videos, images, or both
+ig2txt --audio-only "<url>"                   # speech only, through OpenAI Whisper
 ```
 
 To let an AI agent use it, read [AGENTS.md](AGENTS.md).
@@ -53,7 +56,7 @@ model: <Gemini model>
 # <title>
 
 ## Takeaways
-## Timeline         # [mm:ss] SAID / ON SCREEN / SHOWN; ### Item N per carousel item
+## Timeline         # [mm:ss] SAID / ON SCREEN / SHOWN; ### Item N per carousel item, no timestamps on images
 ## Shown, not said
 ```
 
@@ -69,7 +72,7 @@ model: <Gemini model>
 
 ## Cost
 
-An 80-second reel is about 45K input tokens on Gemini Flash, roughly $0.05. Audio-only mode is about $0.006 per minute.
+An 80-second reel is about 45K input tokens on Gemini Flash, roughly $0.05. An 8-slide image carousel is about 9K. Audio-only mode is about $0.006 per minute.
 
 ## Test
 
@@ -77,6 +80,6 @@ An 80-second reel is about 45K input tokens on Gemini Flash, roughly $0.05. Audi
 bash tests/test.sh
 ```
 
-The test runs offline. It replaces yt-dlp, ffmpeg and the Gemini API with stubs, and checks the request and the note for a single video and for a carousel.
+The test runs offline. It replaces yt-dlp, gallery-dl, ffmpeg and the Gemini API with stubs, and checks the request and the note for a single video, a reel, and video, mixed and image-only carousels.
 
 See [GOTCHAS.md](GOTCHAS.md) for carousels, cookies and limits.
