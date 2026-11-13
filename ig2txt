@@ -1,0 +1,375 @@
+#!/usr/bin/env bash
+# Instagram/TikTok/YouTube/LinkedIn video URL → markdown notes.
+# Default: Gemini watches the video — speech plus on-screen text, graphics, annotations.
+# --audio-only: speech-only transcript via OpenAI Whisper API; slug + title via gpt-4o-mini (~$0.0002 per call).
+# Output: $IG2TXT_OUT (default: current folder)/<topic-slug>-<video-id>.md
+# Video carousels: every item is sent in one Gemini request, labelled "Item N".
+
+set -u
+
+audio_only=0
+[ "${1:-}" = "--audio-only" ] && { audio_only=1; shift; }
+[ $# -lt 1 ] && { echo "usage: ig2txt [--audio-only] <video-url>"; exit 1; }
+
+gemini_key="${GEMINI_API_KEY:-}"
+[ -z "$gemini_key" ] && gemini_key=$(security find-generic-password -a "$USER" -s ig2txt-gemini-api-key -w 2>/dev/null)
+if [ "$audio_only" -eq 0 ] && [ -z "$gemini_key" ]; then
+  echo "[warn] GEMINI_API_KEY not set — falling back to audio-only"
+  audio_only=1
+fi
+[ "$audio_only" -eq 1 ] && [ -z "${OPENAI_API_KEY:-}" ] && { echo "error: OPENAI_API_KEY not set"; exit 1; }
+
+command -v yt-dlp >/dev/null || { echo "error: yt-dlp not installed (brew install yt-dlp)"; exit 1; }
+command -v ffmpeg >/dev/null || { echo "error: ffmpeg not installed (brew install ffmpeg)"; exit 1; }
+command -v jq     >/dev/null || { echo "error: jq not installed (brew install jq)"; exit 1; }
+
+url="$1"
+outdir="${IG2TXT_OUT:-$PWD}"
+mkdir -p "$outdir"
+
+tmpdir=$(mktemp -d) || exit 1
+trap 'rm -rf "$tmpdir"' EXIT
+
+browser="${IG2TXT_BROWSER:-chrome}"
+gemini_api="https://generativelanguage.googleapis.com"
+model="${IG2TXT_GEMINI_MODEL:-gemini-flash-latest}"
+
+body="$tmpdir/body.txt"
+id=""
+slug=""
+title=""
+used_model=""
+
+# This site's login cookies are cached in the Keychain after the first browser read, so macOS
+# asks for the "Chrome Safe Storage" password once per site login instead of once per video.
+site=$(echo "$url" | sed -E 's#^[a-zA-Z]+://##; s#[/:?].*$##' | awk -F. '{ if (NF >= 2) print $(NF-1) "." $NF; else print $0 }')
+cookie_service="ig2txt-cookies-$site"
+jar="$tmpdir/cookies.txt"
+
+# Carousel items share the post id and sort by position: media/001_<post-id>.mp4, media/002_<post-id>.mp4.
+# A single video lands as media/NA_<video-id>.mp4.
+tmpl="media/%(playlist_index)03d_%(playlist_id,id)s.%(ext)s"
+items=1
+
+# Fills $media with the completed downloads in media/, in item order.
+collect_media() {
+  local f
+  media=()
+  for f in "$tmpdir"/media/*; do
+    case "$f" in *.part|*.ytdl) continue ;; esac
+    [ -f "$f" ] && media+=("$f")
+  done
+}
+
+# yt-dlp into $tmpdir with the cookie retry; arguments select what to download.
+fetch() {
+  yt-dlp "$@" -o "$tmpdir/$tmpl" --quiet --no-warnings "$url" 2>/dev/null && return 0
+  if [ -z "$browser" ]; then
+    echo "yt-dlp failed (cookies disabled via empty IG2TXT_BROWSER)"; return 1
+  fi
+
+  local cached
+  cached=$(security find-generic-password -a "$USER" -s "$cookie_service" -w 2>/dev/null)
+  if [ -n "$cached" ] && echo "$cached" | base64 -d > "$jar" 2>/dev/null; then
+    yt-dlp "$@" -o "$tmpdir/$tmpl" --cookies "$jar" --quiet --no-warnings "$url" 2>/dev/null && return 0
+  fi
+
+  echo "[yt-dlp] public fetch failed — reading $browser cookies (macOS asks for the keychain password; once per site login)..."
+  rm -f "$jar"
+  yt-dlp "$@" -o "$tmpdir/$tmpl" --cookies-from-browser "$browser" --cookies "$jar" --quiet --no-warnings "$url" || {
+    echo "yt-dlp failed even with $browser cookies — login required + cookies unavailable, or unsupported URL"; return 1
+  }
+  # Cache only this site's cookies, not the whole browser jar.
+  if [ -s "$jar" ]; then
+    cached=$(awk -F'\t' -v s="$site" 'NR == 1 { print; next }
+      NF >= 7 { d = $1; sub(/^#HttpOnly_/, "", d); n = length(d) - length(s)
+                if (n >= 0 && substr(d, n + 1) == s && (n == 0 || substr(d, n, 1) == ".")) print }' "$jar" | base64 | tr -d '\n')
+    [ -n "$cached" ] && security add-generic-password -a "$USER" -s "$cookie_service" -U -w "$cached" 2>/dev/null
+  fi
+  return 0
+}
+
+read -r -d '' watch_prompt <<'EOF'
+Turn this video into reference notes for someone who will never watch it. Capture everything it communicates, especially what is shown but never said.
+
+Output plain markdown in exactly this shape, with no preamble and no code fence around it:
+
+slug: <3-5 words, lowercase, kebab-case, ascii only>
+title: <3-8 words, title case>
+
+## Takeaways
+3-6 bullets: the concrete, reusable points of the video.
+
+## Timeline
+Chronological entries, each starting with a [mm:ss] timestamp and one of these labels:
+- SAID: the speech, verbatim, in its original language. Merge consecutive sentences into one entry until the visuals change.
+- ON SCREEN: every caption, title, label, annotation, slide, code snippet, number or UI text, verbatim.
+- SHOWN: what is demonstrated visually. Diagrams as structure (nodes and links, axes, rows and columns; use lists or tables). Interfaces and interactions (layout, components, states, what changes between before and after, what moves and how). Name any tool, product or site visible on screen.
+
+## Shown, not said
+Bullets: information that appears only visually and is absent from the speech.
+
+Rules: never guess text you cannot read; write [illegible]. Never invent speech; if there is none, omit SAID entries and say so in one line under Takeaways. No commentary on production quality or music.
+EOF
+
+read -r -d '' carousel_prompt <<'EOF'
+This post is a carousel: the videos above are its items, in order, each labelled "Item N". Treat them as one piece and write one set of notes covering every item. In the Timeline, start each item with a line "### Item N" and restart timestamps at [00:00] for each item.
+EOF
+
+# Uploads one file to the Gemini Files API and waits until it is ready. Appends to $uris and $names.
+upload() {
+  local video="$1" size upload_url file_json uri name state="" i
+  size=$(wc -c < "$video" | tr -d " ")
+  echo "[gemini] uploading $(basename "$video") ($(( size / 1048576 ))MB)..."
+  upload_url=$(curl -sS -D - -o /dev/null "$gemini_api/upload/v1beta/files" \
+    -H "x-goog-api-key: $gemini_key" \
+    -H "X-Goog-Upload-Protocol: resumable" \
+    -H "X-Goog-Upload-Command: start" \
+    -H "X-Goog-Upload-Header-Content-Length: $size" \
+    -H "X-Goog-Upload-Header-Content-Type: video/mp4" \
+    -H "Content-Type: application/json" \
+    -d "{\"file\":{\"display_name\":\"$(basename "$video" .mp4)\"}}" | tr -d '\r' | awk 'tolower($1)=="x-goog-upload-url:"{print $2}')
+  [ -n "$upload_url" ] || { echo "gemini upload could not start"; return 1; }
+  file_json=$(curl -sS "$upload_url" \
+    -H "Content-Length: $size" \
+    -H "X-Goog-Upload-Offset: 0" \
+    -H "X-Goog-Upload-Command: upload, finalize" \
+    --data-binary "@$video") || { echo "gemini upload failed"; return 1; }
+  uri=$(echo "$file_json" | jq -r '.file.uri // ""' 2>/dev/null)
+  name=$(echo "$file_json" | jq -r '.file.name // ""' 2>/dev/null)
+  [ -n "$uri" ] || { echo "gemini upload failed"; return 1; }
+  names+=("$name")
+
+  for i in $(seq 1 150); do
+    state=$(curl -sS -H "x-goog-api-key: $gemini_key" "$gemini_api/v1beta/$name" | jq -r '.state // ""' 2>/dev/null)
+    [ "$state" = "ACTIVE" ] && break
+    [ "$state" = "FAILED" ] && break
+    sleep 2
+  done
+  [ "$state" = "ACTIVE" ] || { echo "gemini could not process the video (state: ${state:-unknown})"; return 1; }
+  uris+=("$uri")
+}
+
+# Removes every file uploaded so far from Gemini.
+cleanup_uploads() {
+  local n
+  for n in ${names[@]+"${names[@]}"}; do
+    curl -sS -X DELETE -H "x-goog-api-key: $gemini_key" "$gemini_api/v1beta/$n" -o /dev/null
+  done
+  names=()
+}
+uris=()
+names=()
+
+# Video mode: fills $body, $id, $slug, $title, $used_model. Returns 1 on any failure.
+watch() {
+  local uri="" mime="" duration=0 fps=0 res="MEDIA_RESOLUTION_HIGH"
+
+  case "$url" in
+    *youtube.com/*|*youtu.be/*)
+      local meta
+      meta=$(yt-dlp --print "%(id)s %(duration)s" --skip-download --no-warnings "$url" 2>/dev/null | head -1)
+      duration="${meta##* }"; duration="${duration%.*}"
+      case "$duration" in ''|*[!0-9]*) duration=0 ;; esac
+      # Talks over 20 min go by URL instead of download; Gemini samples those at standard frame resolution.
+      if [ "$duration" -gt 1200 ]; then
+        id="${meta%% *}"
+        uri="https://www.youtube.com/watch?v=$id"
+      fi
+      ;;
+  esac
+
+  if [ -z "$uri" ]; then
+    echo "[yt-dlp] downloading video..."
+    fetch -f "bv*[height<=720]+ba/b[height<=720]/b" --merge-output-format mp4 || return 1
+    local video d
+    local videos=("$tmpdir"/media/*.mp4)
+    [ -f "${videos[0]}" ] || { echo "no video downloaded"; return 1; }
+    items=${#videos[@]}
+    id=$(basename "${videos[0]}" .mp4); id="${id#*_}"
+    [ "$items" -gt 1 ] && echo "[carousel] $items videos"
+    duration=0
+    for video in "${videos[@]}"; do
+      d=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$video" 2>/dev/null)
+      d="${d%.*}"
+      case "$d" in ''|*[!0-9]*) d=0 ;; esac
+      duration=$(( duration + d ))
+      upload "$video" || { cleanup_uploads; return 1; }
+    done
+    mime="video/mp4"
+  else
+    uris=("$uri")
+  fi
+
+  # Frame detail vs cost: clips up to 3 min get 2 fps so brief on-screen text is caught;
+  # past 20 min (or unknown length) high resolution would not fit the context window.
+  if [ "$duration" -eq 0 ] || [ "$duration" -gt 1200 ]; then
+    res=""
+  elif [ "$duration" -le 180 ]; then
+    fps=2
+  fi
+
+  echo "[gemini] watching (${duration}s, $model)..."
+  local resp="$tmpdir/gemini.json" prompt="$watch_prompt"
+  [ "$items" -gt 1 ] && prompt="$carousel_prompt
+
+$watch_prompt"
+  # Each item's video part, preceded by an "Item N" label when the post is a carousel.
+  printf '%s\n' "${uris[@]}" | jq -R . | jq -s --arg mime "$mime" --arg p "$prompt" --argjson fps "$fps" --arg res "$res" '{
+    contents: [{parts: ((
+      length as $n | [to_entries[] |
+        (if $n > 1 then [{text: "Item \(.key + 1)"}] else [] end)
+        + [({file_data: ({file_uri: .value} + (if $mime != "" then {mime_type: $mime} else {} end))}
+            + (if $fps > 0 then {video_metadata: {fps: $fps}} else {} end))]
+      ] | add) + [{text: $p}])
+    }],
+    generationConfig: ({maxOutputTokens: 32768} + (if $res != "" then {mediaResolution: $res} else {} end))
+  }' | curl -sS "$gemini_api/v1beta/models/${model}:generateContent" \
+    -H "x-goog-api-key: $gemini_key" \
+    -H "Content-Type: application/json" \
+    -d @- -o "$resp" || { echo "gemini request failed"; cleanup_uploads; return 1; }
+
+  cleanup_uploads
+
+  local text
+  text=$(jq -r '[.candidates[0].content.parts[]?.text // empty] | join("")' "$resp" 2>/dev/null)
+  if [ -z "$text" ]; then
+    echo "gemini returned no notes: $(jq -r '.error.message // .candidates[0].finishReason // "unknown"' "$resp" 2>/dev/null)"
+    return 1
+  fi
+  echo "[gemini] $(jq -r '.usageMetadata.promptTokenCount // "?"' "$resp") input tokens, $(jq -r '.usageMetadata.candidatesTokenCount // "?"' "$resp") output tokens"
+
+  used_model=$(jq -r '.modelVersion // ""' "$resp" 2>/dev/null)
+  slug=$(echo "$text" | grep -m1 -i '^slug:' | sed 's/^[Ss][Ll][Uu][Gg]:[[:space:]]*//')
+  title=$(echo "$text" | grep -m1 -i '^title:' | sed 's/^[Tt][Ii][Tt][Ll][Ee]:[[:space:]]*//' | tr -d '"')
+  echo "$text" | awk '!s && tolower($0) ~ /^slug:/ {s=1; next} !t && tolower($0) ~ /^title:/ {t=1; next} {print}' | sed '/./,$!d' > "$body"
+  [ -s "$body" ]
+}
+
+if [ "$audio_only" -eq 0 ] && ! watch; then
+  [ -z "${OPENAI_API_KEY:-}" ] && exit 1
+  echo "[warn] video mode failed — falling back to audio-only"
+  audio_only=1
+fi
+
+if [ "$audio_only" -eq 1 ]; then
+  # Reuse what video mode already downloaded; otherwise fetch the best audio, or the whole file when
+  # there is no separate audio. Audio is extracted locally, so an item without a sound track is
+  # reported as such instead of failing the download and triggering the cookie retry.
+  collect_media
+  if [ "${#media[@]}" -eq 0 ]; then
+    echo "[yt-dlp] downloading audio..."
+    fetch -f "ba/b" || exit 1
+    collect_media
+  fi
+  [ "${#media[@]}" -gt 0 ] || { echo "nothing downloaded"; exit 1; }
+  items=${#media[@]}
+  id=$(basename "${media[0]}"); id="${id%.*}"; id="${id#*_}"
+  : > "$body"
+
+  n=0
+  heard=0
+  for file in "${media[@]}"; do
+    n=$(( n + 1 ))
+    [ "$items" -gt 1 ] && printf '## Item %s\n\n' "$n" >> "$body"
+    if [ -z "$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$file" 2>/dev/null)" ]; then
+      echo "[audio] item $n/$items has no sound track — skipped"
+      [ "$items" -gt 1 ] && printf '(no sound track)\n\n' >> "$body"
+      continue
+    fi
+    audio="$tmpdir/audio-$n.mp3"
+    ffmpeg -v error -y -i "$file" -vn -c:a libmp3lame -q:a 5 "$audio" || { echo "audio extraction failed"; exit 1; }
+
+    size_mb=$(( $(wc -c < "$audio") / 1048576 ))
+    if [ "$size_mb" -gt 24 ]; then
+      echo "audio ${size_mb}MB exceeds OpenAI 25MB limit — long video, needs chunking"
+      exit 1
+    fi
+
+    echo "[whisper] transcribing $n/$items (${size_mb}MB)..."
+    curl -sS https://api.openai.com/v1/audio/transcriptions \
+      -H "Authorization: Bearer $OPENAI_API_KEY" \
+      -F file="@$audio" \
+      -F model="whisper-1" \
+      -F response_format="verbose_json" \
+      -o "$tmpdir/whisper-$n.json" || { echo "transcription failed"; exit 1; }
+    # Whisper invents text over music ("Thanks for watching.", subtitle credits, "♪♪"). Measured on
+    # 2026-10-31: real speech scores no_speech_prob ~0.05 at avg_logprob ~-0.4; those hallucinations
+    # score above 0.5, or above 0.2 with avg_logprob below -0.6, or carry no letters at all.
+    said=$(jq -r '[.segments[]? | select(.no_speech_prob < 0.5
+        and ((.no_speech_prob > 0.2 and .avg_logprob < -0.6) | not)
+        and (.text | test("\\p{L}"))) | .text | sub("^ +"; "")] | join(" ")' "$tmpdir/whisper-$n.json" 2>/dev/null)
+    if [ -z "$said" ]; then
+      echo "[whisper] item $n/$items has no speech (music or noise only)"
+      [ "$items" -gt 1 ] && printf '(no speech)\n\n' >> "$body"
+      continue
+    fi
+    echo "$said" >> "$body"
+    [ "$items" -gt 1 ] && echo "" >> "$body"
+    heard=$(( heard + 1 ))
+  done
+
+  if [ "$heard" -eq 0 ]; then
+    echo "no speech in this video — nothing for audio-only mode to transcribe; silent or music-only clips need video mode (Gemini)"
+    exit 1
+  fi
+
+  [ ! -s "$body" ] && { echo "empty transcript"; exit 1; }
+
+  echo "[gpt-4o-mini] generating slug + title..."
+  transcript_sample=$(head -c 2000 "$body")
+  slug_response=$(jq -n \
+    --arg t "$transcript_sample" \
+    '{
+      model: "gpt-4o-mini",
+      messages: [
+        {role: "system", content: "You generate filenames for video transcripts. Output JSON with exactly two keys: \"slug\" (3-5 words, lowercase, kebab-case, alphanumeric + hyphens only, max 50 chars) and \"title\" (3-8 words, title case, human-readable). Output ONLY the JSON object, no other text."},
+        {role: "user", content: ("Transcript:\n" + $t)}
+      ],
+      response_format: {type: "json_object"},
+      max_tokens: 80,
+      temperature: 0.2
+    }' | curl -sS https://api.openai.com/v1/chat/completions \
+      -H "Authorization: Bearer $OPENAI_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d @-)
+
+  content=$(echo "$slug_response" | jq -r '.choices[0].message.content // ""' 2>/dev/null)
+  slug=$(echo "$content" | jq -r '.slug // ""' 2>/dev/null)
+  title=$(echo "$content" | jq -r '.title // ""' 2>/dev/null)
+fi
+
+slug=$(echo "$slug" | tr '[:upper:]' '[:lower:]' | tr ' _' '-' | tr -cd 'a-z0-9-' | sed 's/--*/-/g; s/^-//; s/-$//' | cut -c1-50)
+
+if [ -n "$slug" ]; then
+  out="$outdir/${slug}-${id}.md"
+else
+  echo "[warn] slug generation failed — falling back to video-id-only filename"
+  out="$outdir/${id}.md"
+fi
+[ -z "$title" ] && title="Video Transcript ${id}"
+
+{
+  echo "---"
+  echo "source: $url"
+  echo "video_id: $id"
+  echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "title: \"$title\""
+  [ "$items" -gt 1 ] && echo "items: $items"
+  if [ "$audio_only" -eq 1 ]; then
+    echo "mode: audio"
+  else
+    echo "mode: video"
+    echo "model: $used_model"
+  fi
+  echo "---"
+  echo ""
+  echo "# $title"
+  echo ""
+  cat "$body"
+} > "$out"
+
+echo ""
+echo "→ $out"
+echo ""
+cat "$out"
