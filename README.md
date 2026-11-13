@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/hero.png" width="880" alt="An invented example reel, 38 seconds. On screen: the caption 'Disk full? 1 command' and a terminal with the command du -sh ~/* | sort -h | tail -5, which lists five folders by size, with Downloads last at 48G. The speech only says: Open the terminal and paste this. watch2md turns the reel link into a note. Its Timeline has each SAID, ON SCREEN and SHOWN entry with a timestamp. Its 'Shown, not said' section has the command and the 48G Downloads folder. The command is never said. The note has it.">
+  <img src="assets/hero.png" width="880" alt="An invented example reel, 38 seconds, on a short-video screen with an invented creator, like, comment, share and save counts, and burned-in subtitles. On screen: the caption 'Disk full? 1 command' and a terminal with the command du -sh ~/* | sort -h | tail -5, which lists five folders by size, with Downloads last at 48G. The speech only says: Open the terminal and paste this. watch2md turns the reel link into a note. Its Timeline has each SAID, ON SCREEN and SHOWN entry with a timestamp. Its 'Shown, not said' section has the command and the 48G Downloads folder. The command is never said. The note has it.">
 </p>
 
 Short videos teach a lot: a prompt, a command, a framework on a slide, a tool in a demo. Much of it is only on screen. Give your agent the link to a reel, a TikTok, a YouTube video or an Instagram carousel. Your agent runs `watch2md "<url>"` and gets a markdown note with the speech and with all that the video shows: captions, slides, code, UI demos and diagrams. Then your agent puts that knowledge into your skills, playbooks and notes.
