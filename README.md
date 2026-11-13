@@ -1,7 +1,7 @@
 <h1 align="center">ig2txt</h1>
 
 <p align="center">
-  <strong>Turn a video link into a note your AI agent can read: what is said, and what is only shown.</strong>
+  <strong>Turn short videos into knowledge your AI agent can use: what is said, and what is only on screen.</strong>
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
   <img src="assets/hero.png" width="880" alt="An invented example reel, 38 seconds. On screen: the caption 'Disk full? 1 command' and a terminal with the command du -sh ~/* | sort -h | tail -5, which lists five folders by size, with Downloads last at 48G. The speech only says: Open the terminal and paste this. ig2txt turns the reel link into a note. Its Timeline has each SAID, ON SCREEN and SHOWN entry with a timestamp. Its 'Shown, not said' section has the command and the 48G Downloads folder. The command is never said. The note has it.">
 </p>
 
-Give your agent a reel, a TikTok, a YouTube video or an Instagram carousel. Your agent runs `ig2txt "<url>"` and reads the note. The note has the speech, and also the captions, slides, code, UI demos and diagrams that the video only shows.
+Short videos teach a lot: a prompt, a command, a framework on a slide, a tool in a demo. Much of it is only on screen. Give your agent the link to a reel, a TikTok, a YouTube video or an Instagram carousel. Your agent runs `ig2txt "<url>"` and gets a markdown note with the speech and with all that the video shows: captions, slides, code, UI demos and diagrams. Then your agent puts that knowledge into your skills, playbooks and notes.
 
 A transcript tool hears the speech only. In a reel that says *"paste this"* and shows the command on screen, the transcript has no command. An image carousel has no speech, so a transcript is empty. ig2txt sends every item to Gemini, which watches the video and reads each slide.
 
@@ -78,9 +78,9 @@ The prompt tells Gemini to write `[illegible]` for text it cannot read, and neve
 
 | You | You do today | ig2txt adds |
 |---|---|---|
+| Build AI skills, prompts and playbooks | You watch a video, then retype the steps by hand | A note your agent turns into a skill or a playbook entry |
 | Use an AI agent every day | Your agent cannot open a video link | One command that your agent runs from any folder |
-| Save reels and carousels to learn from them | You save the post and do not watch it again | A markdown note you can search, quote and reuse |
-| Keep notes in a folder or a knowledge base | You retype the slides and the commands by hand | Every slide and every line of code, verbatim |
+| Keep a knowledge base | You save the post and do not watch it again | A markdown note you can search, quote and reuse, with every slide and every line of code verbatim |
 
 It does not keep the video. The downloads and the Gemini uploads are deleted after each run.
 
