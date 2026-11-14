@@ -18,6 +18,11 @@
 - **yt-dlp cannot list a profile's reels.** Collect the reel URLs from the profile's `/reels/` page in a browser.
 - **Keep yt-dlp and gallery-dl current** (`brew upgrade yt-dlp gallery-dl`). Instagram and TikTok changes break old versions.
 
+## Threads
+
+- **yt-dlp and gallery-dl do not support Threads.** watch2md reads the public post page itself and downloads the post's videos and images. A post with several items is handled as a carousel.
+- **Only public posts with media work.** There is no cookie retry for Threads. A text-only post or a private profile ends with "download failed".
+
 ## Gemini
 
 - **Small on-screen text needs high resolution.** At the default resolution Gemini misread small digits (a date, a unit). watch2md sends `MEDIA_RESOLUTION_HIGH` for videos up to 20 minutes, and 2 frames per second for clips up to 3 minutes. An 80-second reel costs about 45K input tokens, roughly $0.05.

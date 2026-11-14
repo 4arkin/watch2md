@@ -10,7 +10,7 @@ You help a person capture videos and Instagram carousels as notes with `watch2md
 
 ## Rules
 
-- **Any Instagram post or reel (video, image or carousel), and any TikTok, YouTube, LinkedIn or X video URL, goes to `watch2md "<url>"`.** Do not use a scraper, a transcript website or a browser instead.
+- **Any Instagram or Threads post or reel (video, image or carousel), and any TikTok, YouTube, LinkedIn or X video URL, goes to `watch2md "<url>"`.** Do not use a scraper, a transcript website or a browser instead.
 - **Read the note, not the console.** The last line before the note is `→ <path>`. Answer from the note's Takeaways, Timeline and "Shown, not said".
 - **One video at a time.** For a list of URLs, run them in sequence with about 20 seconds between runs.
 - **Say what failed.** If watch2md fell back to audio-only mode, the note has `mode: audio` and has no on-screen content. Tell the person.
@@ -22,5 +22,5 @@ Paste into `CLAUDE.md`, `AGENTS.md` or `GEMINI.md` in your home or project folde
 
 ```markdown
 ## Video URLs
-Any Instagram post, reel or carousel (videos, images or both), and any TikTok / YouTube / LinkedIn / X video URL → `watch2md "<url>"` via the shell, from any folder. Never a scraper or the browser.
+Any Instagram or Threads post, reel or carousel (videos, images or both), and any TikTok / YouTube / LinkedIn / X video URL → `watch2md "<url>"` via the shell, from any folder. Never a scraper or the browser.
 ```

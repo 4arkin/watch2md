@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20Gemini%20CLI-1B512D?style=flat-square" alt="Works with Claude Code, Codex and Gemini CLI">
-  <img src="https://img.shields.io/badge/sources-Instagram%20%C2%B7%20TikTok%20%C2%B7%20YouTube%20%C2%B7%20LinkedIn%20%C2%B7%20X-1B512D?style=flat-square" alt="Instagram, TikTok, YouTube, LinkedIn and X">
+  <img src="https://img.shields.io/badge/sources-Instagram%20%C2%B7%20Threads%20%C2%B7%20TikTok%20%C2%B7%20YouTube%20%C2%B7%20LinkedIn%20%C2%B7%20X-1B512D?style=flat-square" alt="Instagram, Threads, TikTok, YouTube, LinkedIn and X">
   <img src="https://img.shields.io/badge/80s%20reel-about%20%240.05-1B512D?style=flat-square" alt="An 80-second reel costs about $0.05">
   <img src="https://img.shields.io/badge/one%20bash%20script-1B512D?style=flat-square" alt="One bash script">
   <img src="https://img.shields.io/badge/license-MIT-1B512D?style=flat-square" alt="MIT license">
@@ -116,7 +116,7 @@ Paste this into `CLAUDE.md`, `AGENTS.md` or `GEMINI.md` in your home or project 
 
 ```markdown
 ## Video URLs
-Any Instagram post, reel or carousel (videos, images or both), and any TikTok / YouTube / LinkedIn / X video URL → `watch2md "<url>"` via the shell, from any folder. Never a scraper or the browser.
+Any Instagram or Threads post, reel or carousel (videos, images or both), and any TikTok / YouTube / LinkedIn / X video URL → `watch2md "<url>"` via the shell, from any folder. Never a scraper or the browser.
 ```
 
 Then send a link to your agent. The full protocol is in [AGENTS.md](AGENTS.md).

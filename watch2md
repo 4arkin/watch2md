@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Instagram/TikTok/YouTube/LinkedIn video URL, or Instagram image post → markdown notes.
+# Instagram/Threads/TikTok/YouTube/LinkedIn video URL, or Instagram/Threads image post → markdown notes.
 # Default: Gemini watches the video — speech plus on-screen text, graphics, annotations.
 # --audio-only: speech-only transcript via OpenAI Whisper API; slug + title via gpt-4o-mini (~$0.0002 per call).
 # Output: $WATCH2MD_OUT (default: current folder)/<topic-slug>-<video-id>.md
@@ -24,13 +24,20 @@ command -v ffmpeg >/dev/null || { echo "error: ffmpeg not installed (brew instal
 command -v jq     >/dev/null || { echo "error: jq not installed (brew install jq)"; exit 1; }
 
 url="$1"
+# A lnkd.in short link opens a LinkedIn post URL with tracking parameters, and yt-dlp then uses
+# the parameters as the video id. Resolve the link and drop them.
+case "$url" in *://lnkd.in/*)
+  resolved=$(curl -sI -o /dev/null -w '%{redirect_url}' "$url")
+  [ -n "$resolved" ] && url="$resolved" ;;
+esac
+case "$url" in *linkedin.com/*) url="${url%%\?*}" ;; esac
 outdir="${WATCH2MD_OUT:-$PWD}"
 mkdir -p "$outdir"
 
 tmpdir=$(mktemp -d) || exit 1
 trap 'rm -rf "$tmpdir"' EXIT
 
-browser="${WATCH2MD_BROWSER:-chrome}"
+browser="${WATCH2MD_BROWSER-chrome}"
 gemini_api="https://generativelanguage.googleapis.com"
 model="${WATCH2MD_GEMINI_MODEL:-gemini-flash-latest}"
 
@@ -69,11 +76,40 @@ collect_media() {
   done
 }
 
+# Threads: yt-dlp and gallery-dl have no extractor for it. The public post page holds the media
+# URLs as JSON, and serves them only to a request that looks like a browser opening the page.
+# Files land like a carousel: media/001_<post-code>.mp4, media/002_<post-code>.jpg.
+threads=0
+case "$site" in threads.com|threads.net) threads=1 ;; esac
+threads_dl() {
+  local code final u ext n=0
+  # A /share/ link redirects to the post URL, so the post code comes from the final address.
+  final=$(curl -sSL --compressed "$url" -o "$tmpdir/threads.html" -w '%{url_effective}' \
+    -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36" \
+    -H "Accept: text/html" -H "Sec-Fetch-Mode: navigate" -H "Sec-Fetch-Dest: document" -H "Sec-Fetch-Site: none") || return 1
+  code=$(echo "$final" | sed -nE 's#.*/(post|t)/([A-Za-z0-9_-]+).*#\2#p')
+  [ -n "$code" ] || return 1
+  mkdir -p "$tmpdir/media"
+  # The page also holds replies and quoted posts; take the post whose code is in the URL.
+  while IFS=$'\t' read -r ext u; do
+    n=$(( n + 1 ))
+    curl -sSLf "$u" -o "$tmpdir/media/$(printf %03d "$n")_$code.$ext" || return 1
+  done < <(grep -o '<script type="application/json"[^>]*>[^<]*</script>' "$tmpdir/threads.html" |
+    sed -E 's#^<script[^>]*>##; s#</script>$##' | grep '"video_versions"' |
+    jq -rn --arg c "$code" 'first(inputs | .. | objects | select(.code? == $c and has("video_versions")))
+      | (if (.carousel_media // []) | length > 0 then .carousel_media[] else . end)
+      | if (.video_versions // []) | length > 0 then "mp4\t" + .video_versions[0].url
+        else (.image_versions2.candidates[0].url // empty) | (capture("\\.(?<e>[a-z0-9]+)(\\?|$)").e // "jpg") + "\t" + . end' 2>/dev/null)
+  [ "$n" -gt 0 ]
+}
+
 # Downloads into $tmpdir/media; arguments are cookie options. yt-dlp formats come from $fmt.
 # videos=merged makes gallery-dl take Instagram's MP4 with sound directly; its default first tries
 # the DASH stream through the yt-dlp Python module, which a standalone install does not have.
 dl() {
-  if [ "$site" = "instagram.com" ]; then
+  if [ "$threads" -eq 1 ]; then
+    threads_dl
+  elif [ "$site" = "instagram.com" ]; then
     gallery-dl -q -o videos=merged -D "$tmpdir/media" -f "{num:>03}_{post_shortcode}.{extension}" "$@" "$url"
   else
     yt-dlp "${fmt[@]}" -o "$tmpdir/$tmpl" --quiet --no-warnings "$@" "$url"
@@ -82,7 +118,18 @@ dl() {
 
 # dl with the cookie retry. Set $fmt first.
 fetch() {
-  dl 2>/dev/null && return 0
+  local err="$tmpdir/dl.err"
+  dl 2>"$err" && return 0
+  # A video CDN sometimes refuses one download (TikTok: HTTP 403 about 1 time in 6), and a second
+  # try gets a fresh address. Instagram is not retried: its public fetch fails because of the login.
+  if [ "$threads" -eq 0 ] && [ "$site" != "instagram.com" ]; then
+    sleep 2
+    dl 2>"$err" && return 0
+  fi
+  [ -s "$err" ] && echo "[download] $(tail -1 "$err")"
+  if [ "$threads" -eq 1 ]; then
+    echo "download failed — this Threads post has no video or image, or it is not public"; return 1
+  fi
   if [ -z "$browser" ]; then
     echo "download failed (cookies disabled via empty WATCH2MD_BROWSER)"; return 1
   fi
