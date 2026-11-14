@@ -126,7 +126,8 @@ fetch() {
     sleep 2
     dl 2>"$err" && return 0
   fi
-  [ -s "$err" ] && echo "[download] $(tail -1 "$err")"
+  # Not for Instagram: its login redirect is the normal case, and the cookie retry handles it.
+  [ "$site" != "instagram.com" ] && [ -s "$err" ] && echo "[download] $(tail -1 "$err")"
   if [ "$threads" -eq 1 ]; then
     echo "download failed — this Threads post has no video or image, or it is not public"; return 1
   fi
